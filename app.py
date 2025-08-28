@@ -3,64 +3,55 @@ from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import av
 import cv2
 import numpy as np
-import mediapipe as mp
 from tensorflow.keras.models import load_model
 import time
 import pandas as pd
 
+# Load model CNN
 model = load_model("emotion_model.keras")
 class_names = ['marah', 'netral', 'sedih', 'senang', 'terkejut']
 negative_emotions = ['marah', 'sedih']
 
-mp_face_detection = mp.solutions.face_detection
+# Load Haarcascade untuk deteksi wajah
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
 st.set_page_config(page_title="Deteksi Emosi Wajah", layout="centered")
 st.title("Deteksi Emosi Wajah Real-Time")
 
 class EmotionProcessor(VideoTransformerBase):
     def __init__(self):
-        self.detector = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.6)
         self.emotions = []
         self.last_time = time.time()
         self.current_label = "..."
 
     def transform(self, frame: av.VideoFrame) -> np.ndarray:
         img = frame.to_ndarray(format="bgr24")
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = self.detector.process(rgb)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        if results.detections:
-            for detection in results.detections:
-                bbox = detection.location_data.relative_bounding_box
-                ih, iw, _ = img.shape
-                x = int(bbox.xmin * iw)
-                y = int(bbox.ymin * ih)
-                w = int(bbox.width * iw)
-                h = int(bbox.height * ih)
-                x, y = max(0, x), max(0, y)
-                w, h = min(iw - x, w), min(ih - y, h)
+        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        for (x, y, w, h) in faces:
+            face = gray[y:y+h, x:x+w]
 
-                face = rgb[y:y + h, x:x + w]
-                if face.size == 0:
-                    continue
+            if face.size == 0:
+                continue
 
-                face_resized = cv2.resize(face, (48, 48))
-                face_normalized = face_resized / 255.0
-                face_input = np.expand_dims(face_normalized, axis=0)
+            face_resized = cv2.resize(face, (48, 48))
+            face_normalized = face_resized / 255.0
+            face_input = np.expand_dims(face_normalized, axis=(0, -1))  # (1, 48, 48, 1)
 
-                if time.time() - self.last_time >= 2:
-                    pred = model.predict(face_input, verbose=0)
-                    label_idx = np.argmax(pred)
-                    self.current_label = class_names[label_idx]
+            if time.time() - self.last_time >= 2:
+                pred = model.predict(face_input, verbose=0)
+                label_idx = np.argmax(pred)
+                self.current_label = class_names[label_idx]
 
-                    if self.current_label != "netral":
-                        self.emotions.append(self.current_label)
+                if self.current_label != "netral":
+                    self.emotions.append(self.current_label)
 
-                    self.last_time = time.time()
+                self.last_time = time.time()
 
-                cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(img, self.current_label, (x, y - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(img, self.current_label, (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
         return img
 
